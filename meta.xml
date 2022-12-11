@@ -1,0 +1,7 @@
+<meta>
+	<info author="BurakMrx" name="İşyeri Sistemi" version="1"/>
+	<script src="c_WorkplaceSystem.lua" type="client"/>
+    <script src="s_WorkplaceSystem.lua" type="server"/>
+	<file src="files/Font13.ttf"/>
+</meta>
+<!-- DEVELOPMENT BY BURAKMRX -->
