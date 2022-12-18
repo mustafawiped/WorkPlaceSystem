@@ -2,8 +2,15 @@ db = dbConnect("sqlite","files/results.db")
 local markerlar = { }
 local px,py,pz
 local girismarkerlari = { }
-local isyerisatinalmasiniri = 2
-local kiradancikma = "kiradancik"
+local isyerisatinalmasiniri = 2 --işyeri satın alma sınırını belirlersiniz.
+local isyerikiralamasiniri = 2 --işyeri kiralama sınırını belirlersiniz.
+local kiradancikma = "kiradancik" --kiradan çıkma komutunu belirlersiniz
+local aydabirgun = 18 --Her ay ödeme günü. 05 yazarsanız her ay 'ın 5 inde ödeme yapılır. ÖNEMLİ: eğer rakam yazacaksanız başına 0 eklemeyi unutmayın aksi halde çalışmaz. (Örn: 05, 07, 09)
+local odenek = 200000 --her ay ödenecek miktar
+local odeneklerisifirla = "odeneklerisifirla" --Ödenekler bir kez daha ödenmemesi için, ödeme alındığında oyunculara engel koyulur. Sonraki ay oyuncular
+-- ödeneklerini alması için, sonraki ödeme günü gelmeden önce ödenekleri sıfırlamalısınız. Ödenekleri sadece yetkili acl grubundaki kişi sıfırlayabilir.
+local yetkili = "Console"
+local isyeriolusturma = "isyeriolustur" --işyeri oluşturma panelini açma komutunu belirler
 
 local interiorlar = {
      ["Galeri"] = {
@@ -53,7 +60,7 @@ addEventHandler("WorkPlaceSystem:CreateWorkPlace",getRootElement(),function(id,s
     local x,y,z = getElementPosition(source)
     local tablo = {tostring(x),tostring(y),tostring(z)}
     local konum = toJSON(tablo)
-    dbExec(db,"INSERT INTO veriler (id,sahip,turu,kilit,fiyati,kiraci,xyz,durum,mekan,kirafiyati) VALUES (?,?,?,?,?,?,?,?,?,?)",id,sahip,tur,kilit,fiyat,"-",konum,"Satılık",tonumber(mekan),"-")
+    dbExec(db,"INSERT INTO veriler (id,sahip,turu,kilit,fiyati,kiraci,xyz,durum,mekan,kirafiyati,odenek) VALUES (?,?,?,?,?,?,?,?,?,?,?)",id,sahip,tur,kilit,fiyat,"-",konum,"Satılık",tonumber(mekan),"-",false)
     local marker = createMarker ( x, y, z+1, "arrow", 1.2, 255, 127, 0, 170 )
     addEventHandler("onMarkerHit",marker,markeragiris)
     table.insert(markerlar,{marker,id,tur,mekan})
@@ -126,7 +133,7 @@ function markeragiris(oyuncu)
     triggerClientEvent(oyuncu,"WorkPlaceSystem:LogIN",oyuncu,result,id)
 end
 
-addCommandHandler("isyeriolustur",function(oyuncu)
+addCommandHandler(isyeriolusturma,function(oyuncu)
     hesap = getAccountName(getPlayerAccount(oyuncu))
     if isObjectInACLGroup("user."..hesap, aclGetGroup("Console")) then
         local results = dbPoll(dbQuery(db,"SELECT * FROM veriler ORDER BY id ASC"),-1)
@@ -194,6 +201,7 @@ addEventHandler("WorkPlaceSystem:RentToWorkPlace",getRootElement(),function(id)
     local isyerisahibi
     local kirafiyati
     local tur
+    local sayis = 0
     local veriler = dbPoll(dbQuery(db,"SELECT * FROM veriler"),-1)
     for i,v in pairs(veriler) do
         if tostring(v["id"]) == tostring(id) then
@@ -207,10 +215,10 @@ addEventHandler("WorkPlaceSystem:RentToWorkPlace",getRootElement(),function(id)
             tur = v["turu"]
         end
         if tostring(hesap) == tostring(v["kiraci"]) then
-            outputChatBox("#FF0000[BİLGİLENDİRME] #ffffffSadece 1 işyeri kiralayabilirsiniz. Kiradan çıkmak için /"..kiradancikma.." komutunu kullanın.",source,255,255,255,true)
-            return
+            sayis = sayis + 1
         end
     end
+    if tonumber(sayis) >= isyerikiralamasiniri then outputChatBox("#FF0000[BİLGİLENDİRME] #ffffffİşyerini kiralama sınırını aştığınız için, kiralayamazsınız. Kiralama Sınırı: "..isyerikiralamasiniri,source,255,255,255,true) return end
     if tostring(durum) == "Kiralık" then
         if tonumber(parasi) >= tonumber(kirafiyati) then
             local gonderilecek = 0 - tonumber(kirafiyati)
@@ -432,5 +440,58 @@ addCommandHandler(kiradancikma,function(oyuncu)
         outputChatBox("#ff7f00● #ffffffBaşarıyla İşyeri kiracılığından çıktınız!",source,255,255,255,true)
     else
         outputChatBox("#FF0000[BİLGİLENDİRME] #ffffffHerhangi bir #ff0000işyeri kiralamamışsınız.",source,255,255,255,true)
+    end
+end)
+
+addEventHandler("onPlayerLogin",getRootElement(),function()
+    local time = getRealTime()
+    local monthday = time.monthday
+    local gun = string.format("%02d",monthday)
+    if tostring(gun) == tostring(aydabirgun) then
+        local hesap = getAccountName(getPlayerAccount(source))
+        local evsahibimi = false
+        local kiracimi = false
+        local id
+        local durum
+        local results = dbPoll(dbQuery(db,"SELECT * FROM veriler"),-1)
+        for i,v in pairs(results) do
+            if tostring(hesap) == tostring(v["sahip"]) and tostring(v["kiraci"]) == "-" then
+                evsahibimi = true
+                durum = v["odenek"]
+                id = v["id"]
+            elseif tostring(hesap) == tostring(v["kiraci"]) then
+                kiracimi = true
+                durum = v["odenek"]
+                id = v["id"]
+            end
+        end
+        if evsahibimi == true then
+            if durum == "false" then
+            triggerEvent("gecmis:ekle", root, hesap, "İşyeri Aylık Devlet Ödemesi yapıldı! İşyeri Sıra Numarası: "..id)
+            triggerEvent("para:ekle", root, hesap, tonumber(odenek))
+            dbExec(db,"UPDATE veriler SET odenek = ? WHERE sahip = ?","true",hesap)
+            else
+            end
+        elseif kiracimi == true then
+            if durum == "false" then
+                triggerEvent("gecmis:ekle", root, hesap, "İşyeri Aylık Devlet Ödemesi yapıldı! İşyeri Sıra Numarası: "..id)
+                triggerEvent("para:ekle", root, hesap, tonumber(odenek))
+                dbExec(db,"UPDATE veriler SET odenek = ? WHERE kiraci = ?","true",hesap)
+            else
+            end
+        end
+    end
+end)
+
+addCommandHandler(odeneklerisifirla,function(oyuncu)
+    local hesap = getAccountName(getPlayerAccount(oyuncu))
+    if isObjectInACLGroup("user."..hesap, aclGetGroup(yetkili)) then
+        local result = dbPoll(dbQuery(db,"SELECT * FROM veriler"),-1)
+        for i,v in pairs(result) do
+            dbExec(db,"UPDATE veriler SET odenek = ? WHERE id = ?","false",v["id"])
+        end
+        outputChatBox("#FF0000[BİLGİLENDİRME] #ffffffÖdenekleri Sıfırlama işlemi başarılı!",oyuncu,255,255,255,true)
+    else
+        outputChatBox("#FF0000[BİLGİLENDİRME] #ffffffÖdenekleri Sıfırlama işlemi başarısız. Erişim Reddedildi.",oyuncu,255,255,255,true)
     end
 end)
